@@ -1,125 +1,468 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, make_response
 import os
 import json
-import sys
+import base64
 
 app = Flask(__name__)
 
-# Railway передает порт через переменную окружения PORT
-PORT = int(os.environ.get("PORT", 8080))
 KEYS_FILE = "keys.json"
+PORT = int(os.environ.get("PORT", 8080))
 
-# HTML-шаблон для веб-панели
-HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>License Server Panel</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        input, button { padding: 8px 12px; margin: 5px; border: 1px solid #ccc; border-radius: 6px; }
-        button { background: #0066cc; color: white; cursor: pointer; border: none; }
-        button:hover { background: #0052a3; }
-        .key-item { font-family: monospace; padding: 8px; border-bottom: 1px solid #eee; }
-        .valid { color: green; }
-        .invalid { color: gray; }
-        code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>🔑 License Key Manager</h1>
-        <p>Сервер работает на порту: <strong>{{ port }}</strong></p>
-        
-        <form method="POST" action="/add">
-            <input type="text" name="key" placeholder="Введите новый ключ" required>
-            <button type="submit">➕ Добавить ключ</button>
-        </form>
-        
-        <h2>📋 Существующие ключи</h2>
-        <div>
-            {% for key_id, key_data in keys.items() %}
-            <div class="key-item">
-                <code>{{ key_id }}</code> — 
-                {% if key_data.active %}
-                <span class="valid">✅ Активен</span>
-                {% else %}
-                <span class="invalid">❌ Использован/Неактивен</span>
-                {% endif %}
-            </div>
-            {% else %}
-            <p>Нет активных ключей. Добавьте первый!</p>
-            {% endfor %}
-        </div>
-        <hr>
-        <small>API проверки: GET /verify?key=ВАШ_КЛЮЧ</small>
-    </div>
-</body>
-</html>
-'''
+# === АУТЕНТИФИКАЦИЯ ===
+# Логин и пароль (можно заменить на свои)
+ADMIN_USER = "kiberpunk"
+ADMIN_PASS = "Xk9#mP2$vL5@qR7!wN3"
 
+def check_auth(username, password):
+    """Проверяет логин и пароль"""
+    return username == ADMIN_USER and password == ADMIN_PASS
+
+def authenticate():
+    """Отправляет запрос на аутентификацию"""
+    return make_response(
+        '<h1>🔐 Access Denied</h1><p>This area requires authentication.</p>', 401,
+        {'WWW-Authenticate': 'Basic realm="License Admin Panel"'}
+    )
+
+def requires_auth(f):
+    """Декоратор для защиты маршрутов"""
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    decorated.__name__ = f.__name__
+    return decorated
+
+# === ФУНКЦИИ ДЛЯ РАБОТЫ С КЛЮЧАМИ ===
 def load_keys():
-    """Загружает ключи из файла"""
     if os.path.exists(KEYS_FILE):
-        try:
-            with open(KEYS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
+        with open(KEYS_FILE, 'r') as f:
+            return json.load(f)
     return {}
 
 def save_keys(keys):
-    """Сохраняет ключи в файл"""
     with open(KEYS_FILE, 'w') as f:
         json.dump(keys, f, indent=2)
 
+# === ВЕБ-ПАНЕЛЬ (ЗАЩИЩЕНА) ===
 @app.route('/')
+@requires_auth
 def panel():
-    """Веб-панель управления ключами"""
     keys = load_keys()
-    return render_template_string(HTML_TEMPLATE, keys=keys, port=PORT)
+    html = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Server | Admin Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0e1a;
+            font-family: 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, monospace;
+            padding: 2rem;
+            min-height: 100vh;
+            color: #e2e8f0;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #1e293b;
+            padding-bottom: 1rem;
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            font-weight: 500;
+            letter-spacing: -0.3px;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .header p {
+            color: #64748b;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            font-family: monospace;
+        }
+
+        /* Add Key Section */
+        .add-section {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .add-section h2 {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: #cbd5e1;
+        }
+
+        .add-form {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .add-form input {
+            flex: 1;
+            min-width: 200px;
+            background: #1e293b;
+            border: 1px solid #334155;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            color: #f1f5f9;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .add-form input:focus {
+            outline: none;
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+        }
+
+        .add-form input::placeholder {
+            color: #475569;
+            font-family: monospace;
+        }
+
+        .btn {
+            background: #1e293b;
+            border: 1px solid #334155;
+            padding: 0.75rem 1.5rem;
+            border-radius: 12px;
+            color: #e2e8f0;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.85rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            border: none;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-danger {
+            border-color: #7f1d1d;
+            color: #f87171;
+        }
+
+        .btn-danger:hover {
+            background: #7f1d1d20;
+            border-color: #ef4444;
+        }
+
+        /* Stats */
+        .stats {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 14px;
+            padding: 0.75rem 1.25rem;
+        }
+
+        .stat-card span:first-child {
+            color: #64748b;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-card span:last-child {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-left: 0.75rem;
+            color: #60a5fa;
+        }
+
+        /* Keys Table */
+        .keys-section {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .keys-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #1e293b;
+            font-weight: 500;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            background: #0b1120;
+        }
+
+        .key-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #1e293b;
+            transition: background 0.15s;
+        }
+
+        .key-item:hover {
+            background: #131c2e;
+        }
+
+        .key-code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            background: #1e293b;
+            padding: 0.3rem 0.75rem;
+            border-radius: 8px;
+            letter-spacing: 0.3px;
+            word-break: break-all;
+        }
+
+        .key-status {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .badge-active {
+            background: #15803d20;
+            color: #4ade80;
+            border: 1px solid #15803d;
+        }
+
+        .badge-inactive {
+            background: #7f1d1d20;
+            color: #f87171;
+            border: 1px solid #7f1d1d;
+        }
+
+        .delete-btn {
+            background: none;
+            border: none;
+            color: #64748b;
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 8px;
+            transition: all 0.15s;
+        }
+
+        .delete-btn:hover {
+            color: #ef4444;
+            background: #7f1d1d30;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #475569;
+        }
+
+        .footer {
+            margin-top: 2rem;
+            text-align: center;
+            font-size: 0.7rem;
+            color: #334155;
+            font-family: monospace;
+        }
+
+        hr {
+            border-color: #1e293b;
+            margin: 0.5rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✦ licensectl</h1>
+            <p>authentication required · key management interface</p>
+        </div>
+
+        <div class="add-section">
+            <h2>➕ generate new key</h2>
+            <form class="add-form" method="POST" action="/add">
+                <input type="text" name="key" placeholder="license-key-xxxx" autocomplete="off">
+                <button type="submit" class="btn btn-primary">create</button>
+            </form>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <span>total keys</span>
+                <span id="totalCount">0</span>
+            </div>
+            <div class="stat-card">
+                <span>active</span>
+                <span id="activeCount">0</span>
+            </div>
+        </div>
+
+        <div class="keys-section">
+            <div class="keys-header">licensed keys</div>
+            <div id="keysList">
+                <div class="empty-state">⸻ no keys loaded ⸻</div>
+            </div>
+        </div>
+        <div class="footer">
+            api endpoint → GET /verify?key=&lt;key&gt;
+        </div>
+    </div>
+
+    <script>
+        function loadKeys() {
+            fetch('/api/keys')
+                .then(r => r.json())
+                .then(keys => {
+                    const container = document.getElementById('keysList');
+                    const totalSpan = document.getElementById('totalCount');
+                    const activeSpan = document.getElementById('activeCount');
+                    
+                    const entries = Object.entries(keys);
+                    const activeCount = entries.filter(([_, d]) => d.active).length;
+                    
+                    totalSpan.innerText = entries.length;
+                    activeSpan.innerText = activeCount;
+                    
+                    if (entries.length === 0) {
+                        container.innerHTML = '<div class="empty-state">⸻ no keys loaded ⸻</div>';
+                        return;
+                    }
+                    
+                    container.innerHTML = entries.map(([key, data]) => `
+                        <div class="key-item">
+                            <code class="key-code">${escapeHtml(key)}</code>
+                            <div class="key-status">
+                                <span class="badge ${data.active ? 'badge-active' : 'badge-inactive'}">
+                                    ${data.active ? '● active' : '○ used/disabled'}
+                                </span>
+                                <button class="delete-btn" onclick="deleteKey('${escapeHtml(key)}')" title="revoke key">✕</button>
+                            </div>
+                        </div>
+                    `).join('');
+                });
+        }
+        
+        function escapeHtml(str) {
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
+        
+        function deleteKey(key) {
+            if (confirm(`revoke key: ${key}?`)) {
+                fetch('/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'key=' + encodeURIComponent(key)
+                }).then(() => loadKeys());
+            }
+        }
+        
+        loadKeys();
+    </script>
+</body>
+</html>'''
+    return html
+
+# === API ДЛЯ AJAX (защищены) ===
+@app.route('/api/keys')
+@requires_auth
+def api_keys():
+    keys = load_keys()
+    return jsonify(keys)
 
 @app.route('/add', methods=['POST'])
+@requires_auth
 def add_key():
-    """Добавление нового ключа"""
     key = request.form.get('key', '').strip()
     if not key:
-        return 'Ключ не может быть пустым', 400
-    
+        return 'Key cannot be empty', 400
     keys = load_keys()
     if key not in keys:
         keys[key] = {'active': True}
         save_keys(keys)
-        return f'<h3>✅ Ключ {key} добавлен!</h3><a href="/">Вернуться</a>'
-    else:
-        return f'<h3>⚠️ Ключ {key} уже существует</h3><a href="/">Вернуться</a>'
+    return '<script>window.location.href="/"</script>'
 
+@app.route('/delete', methods=['POST'])
+@requires_auth
+def delete_key():
+    key = request.form.get('key', '').strip()
+    keys = load_keys()
+    if key in keys:
+        del keys[key]
+        save_keys(keys)
+    return '', 200
+
+# === ПУБЛИЧНЫЙ API (без аутентификации) ===
 @app.route('/verify')
 def verify():
-    """API для проверки ключа клиентами"""
     key = request.args.get('key', '').strip()
-    if not key:
-        return jsonify({'valid': False, 'error': 'Missing key parameter'}), 400
-    
     keys = load_keys()
     is_valid = key in keys and keys[key].get('active', False)
     
-    # Опционально: пометить ключ как использованный после первой проверки
-    # if is_valid and 'used' not in keys[key]:
-    #     keys[key]['used'] = True
+    # Опционально: пометить ключ как использованный после проверки
+    # if is_valid:
+    #     keys[key]['active'] = False
     #     save_keys(keys)
     
     return jsonify({'valid': is_valid})
 
-@app.route('/keys')
-def list_keys():
-    """Получить список всех ключей (только для администрирования)"""
-    # Можно добавить защиту токеном, если нужно
-    return jsonify(load_keys())
+# === МАСКИРОВКА: эндпоинт для админа выглядит как обычная страница ===
+@app.route('/addnew')
+def fake_addnew():
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head><title>404</title><style>body{background:#0a0e1a;color:#aaa;font-family:monospace;padding:2rem;}</style></head>
+    <body>
+        <h1>404</h1>
+        <p>Page not found.</p>
+        <small>/addnew is not a valid endpoint.</small>
+    </body>
+    </html>
+    ''', 404
 
 if __name__ == '__main__':
-    print(f"🚀 Запуск сервера на порту {PORT}")
     app.run(host='0.0.0.0', port=PORT)
