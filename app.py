@@ -1,31 +1,36 @@
 from flask import Flask, request, jsonify, make_response
 import os
 import json
-import base64
 
 app = Flask(__name__)
 
 KEYS_FILE = "keys.json"
+CONFIG_FILE = "config.json"
 PORT = int(os.environ.get("PORT", 8080))
 
-# === АУТЕНТИФИКАЦИЯ ===
-# Логин и пароль (можно заменить на свои)
-ADMIN_USER = "kiberpunk"
-ADMIN_PASS = "Xk9#mP2$vL5@qR7!wN3"
+# === ЗАГРУЗКА/СОХРАНЕНИЕ КОНФИГА ===
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {"admin_user": "kiberpunk", "admin_pass": "Xk9#mP2$vL5@qR7!wN3"}
 
+def save_config(config):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+# === АУТЕНТИФИКАЦИЯ ===
 def check_auth(username, password):
-    """Проверяет логин и пароль"""
-    return username == ADMIN_USER and password == ADMIN_PASS
+    config = load_config()
+    return username == config.get("admin_user") and password == config.get("admin_pass")
 
 def authenticate():
-    """Отправляет запрос на аутентификацию"""
     return make_response(
-        '<h1>🔐 Access Denied</h1><p>This area requires authentication.</p>', 401,
+        '<h1 style="background:#0a0e1a;color:#e2e8f0;padding:2rem;font-family:monospace;">🔐 Access Denied</h1>', 401,
         {'WWW-Authenticate': 'Basic realm="License Admin Panel"'}
     )
 
 def requires_auth(f):
-    """Декоратор для защиты маршрутов"""
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or not check_auth(auth.username, auth.password):
@@ -34,7 +39,7 @@ def requires_auth(f):
     decorated.__name__ = f.__name__
     return decorated
 
-# === ФУНКЦИИ ДЛЯ РАБОТЫ С КЛЮЧАМИ ===
+# === ФУНКЦИИ ДЛЯ КЛЮЧЕЙ ===
 def load_keys():
     if os.path.exists(KEYS_FILE):
         with open(KEYS_FILE, 'r') as f:
@@ -76,7 +81,6 @@ def panel():
             margin: 0 auto;
         }
 
-        /* Header */
         .header {
             margin-bottom: 2rem;
             border-bottom: 1px solid #1e293b;
@@ -98,6 +102,59 @@ def panel():
             font-size: 0.85rem;
             margin-top: 0.5rem;
             font-family: monospace;
+        }
+
+        /* Password Change Section */
+        .password-section {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .password-section h2 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: #fbbf24;
+        }
+
+        .password-form {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+
+        .password-field {
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .password-field label {
+            display: block;
+            font-size: 0.7rem;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .password-field input {
+            width: 100%;
+            background: #1e293b;
+            border: 1px solid #334155;
+            padding: 0.6rem 0.8rem;
+            border-radius: 10px;
+            color: #f1f5f9;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        .password-field input:focus {
+            outline: none;
+            border-color: #fbbf24;
         }
 
         /* Add Key Section */
@@ -130,20 +187,13 @@ def panel():
             padding: 0.75rem 1rem;
             border-radius: 12px;
             color: #f1f5f9;
-            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-family: monospace;
             font-size: 0.9rem;
-            transition: all 0.2s ease;
         }
 
         .add-form input:focus {
             outline: none;
             border-color: #60a5fa;
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
-        }
-
-        .add-form input::placeholder {
-            color: #475569;
-            font-family: monospace;
         }
 
         .btn {
@@ -159,27 +209,25 @@ def panel():
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            background: #3b82f6;
             border: none;
             color: white;
         }
 
         .btn-primary:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+            background: #2563eb;
         }
 
-        .btn-danger {
-            border-color: #7f1d1d;
-            color: #f87171;
+        .btn-warning {
+            background: #d97706;
+            border: none;
+            color: white;
         }
 
-        .btn-danger:hover {
-            background: #7f1d1d20;
-            border-color: #ef4444;
+        .btn-warning:hover {
+            background: #b45309;
         }
 
-        /* Stats */
         .stats {
             display: flex;
             gap: 1rem;
@@ -207,7 +255,6 @@ def panel():
             color: #60a5fa;
         }
 
-        /* Keys Table */
         .keys-section {
             background: #0f172a;
             border: 1px solid #1e293b;
@@ -240,12 +287,11 @@ def panel():
         }
 
         .key-code {
-            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-family: monospace;
             font-size: 0.85rem;
             background: #1e293b;
             padding: 0.3rem 0.75rem;
             border-radius: 8px;
-            letter-spacing: 0.3px;
             word-break: break-all;
         }
 
@@ -282,7 +328,6 @@ def panel():
             font-size: 1.2rem;
             padding: 0.25rem 0.5rem;
             border-radius: 8px;
-            transition: all 0.15s;
         }
 
         .delete-btn:hover {
@@ -296,17 +341,31 @@ def panel():
             color: #475569;
         }
 
+        .success-msg, .error-msg {
+            padding: 0.5rem 1rem;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .success-msg {
+            background: #15803d20;
+            border: 1px solid #15803d;
+            color: #4ade80;
+        }
+
+        .error-msg {
+            background: #7f1d1d20;
+            border: 1px solid #7f1d1d;
+            color: #f87171;
+        }
+
         .footer {
             margin-top: 2rem;
             text-align: center;
             font-size: 0.7rem;
             color: #334155;
             font-family: monospace;
-        }
-
-        hr {
-            border-color: #1e293b;
-            margin: 0.5rem 0;
         }
     </style>
 </head>
@@ -315,6 +374,26 @@ def panel():
         <div class="header">
             <h1>✦ licensectl</h1>
             <p>authentication required · key management interface</p>
+        </div>
+
+        <div id="passwordMsg"></div>
+        <div class="password-section">
+            <h2>🔐 change admin password</h2>
+            <form class="password-form" method="POST" action="/change_password" id="passwordForm">
+                <div class="password-field">
+                    <label>current password</label>
+                    <input type="password" name="current_pass" required>
+                </div>
+                <div class="password-field">
+                    <label>new password</label>
+                    <input type="password" name="new_pass" required>
+                </div>
+                <div class="password-field">
+                    <label>confirm new</label>
+                    <input type="password" name="confirm_pass" required>
+                </div>
+                <button type="submit" class="btn btn-warning">update password</button>
+            </form>
         </div>
 
         <div class="add-section">
@@ -399,6 +478,30 @@ def panel():
                 }).then(() => loadKeys());
             }
         }
+
+        // Обработка смены пароля через fetch
+        document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const msgDiv = document.getElementById('passwordMsg');
+            
+            try {
+                const resp = await fetch('/change_password', {
+                    method: 'POST',
+                    body: formData
+                });
+                const text = await resp.text();
+                if (resp.ok) {
+                    msgDiv.innerHTML = '<div class="success-msg">✓ ' + text + '</div>';
+                    e.target.reset();
+                    setTimeout(() => { msgDiv.innerHTML = ''; }, 3000);
+                } else {
+                    msgDiv.innerHTML = '<div class="error-msg">✗ ' + text + '</div>';
+                }
+            } catch (err) {
+                msgDiv.innerHTML = '<div class="error-msg">✗ connection error</div>';
+            }
+        });
         
         loadKeys();
     </script>
@@ -406,12 +509,38 @@ def panel():
 </html>'''
     return html
 
-# === API ДЛЯ AJAX (защищены) ===
+# === СМЕНА ПАРОЛЯ ===
+@app.route('/change_password', methods=['POST'])
+@requires_auth
+def change_password():
+    current = request.form.get('current_pass', '').strip()
+    new_pass = request.form.get('new_pass', '').strip()
+    confirm = request.form.get('confirm_pass', '').strip()
+    
+    config = load_config()
+    
+    if current != config.get("admin_pass"):
+        return "Current password is incorrect", 400
+    
+    if len(new_pass) < 6:
+        return "New password must be at least 6 characters", 400
+    
+    if new_pass != confirm:
+        return "New passwords do not match", 400
+    
+    if new_pass == current:
+        return "New password must be different from current", 400
+    
+    config["admin_pass"] = new_pass
+    save_config(config)
+    
+    return "Password changed successfully! Please re-login with new password", 200
+
+# === API ДЛЯ AJAX ===
 @app.route('/api/keys')
 @requires_auth
 def api_keys():
-    keys = load_keys()
-    return jsonify(keys)
+    return jsonify(load_keys())
 
 @app.route('/add', methods=['POST'])
 @requires_auth
@@ -435,21 +564,15 @@ def delete_key():
         save_keys(keys)
     return '', 200
 
-# === ПУБЛИЧНЫЙ API (без аутентификации) ===
+# === ПУБЛИЧНЫЙ API ===
 @app.route('/verify')
 def verify():
     key = request.args.get('key', '').strip()
     keys = load_keys()
     is_valid = key in keys and keys[key].get('active', False)
-    
-    # Опционально: пометить ключ как использованный после проверки
-    # if is_valid:
-    #     keys[key]['active'] = False
-    #     save_keys(keys)
-    
     return jsonify({'valid': is_valid})
 
-# === МАСКИРОВКА: эндпоинт для админа выглядит как обычная страница ===
+# === МАСКИРОВКА ===
 @app.route('/addnew')
 def fake_addnew():
     return '''
@@ -459,7 +582,6 @@ def fake_addnew():
     <body>
         <h1>404</h1>
         <p>Page not found.</p>
-        <small>/addnew is not a valid endpoint.</small>
     </body>
     </html>
     ''', 404
